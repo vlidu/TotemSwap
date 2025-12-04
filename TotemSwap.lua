@@ -1,8 +1,5 @@
--- TotemSwap.lua (Turtle WoW 1.12)
--- Équipe automatiquement les totems off-hand selon le sort lancé (Shaman).
--- Earth/Flame/Frost Shock → Totem of Rage (CD 6s)
--- Lightning Bolt/Chain Lightning → Totem of the Storm (CD 1.8s pour LB, 6s pour CL)
--- Molten Blast → Totem of Eruption (GCD throttle)
+-- TotemSwap.lua (Turtle WoW 1.12) - GCD-based + Configurable totem modes
+-- Options: Rage/Stonebreaker pour Shocks, Storm/Crackling pour Bolts
 
 local GetContainerNumSlots  = GetContainerNumSlots
 local GetContainerItemLink  = GetContainerItemLink
@@ -15,9 +12,10 @@ local GetTime               = GetTime
 local string_find           = string.find
 local BOOKTYPE_SPELL        = BOOKTYPE_SPELL or "spell"
 
-local NameIndex   = {}  -- [itemName] = {bag=#, slot=#, link="|Hitem:..|h[Name]|h|r"}
-local reindexQueued = false
+local NameIndex   = {}
 local SpellCache = {}
+
+local lastSwapTime = 0
 
 local function IsInteractionBusy()
     return (MerchantFrame and MerchantFrame:IsVisible())
@@ -30,28 +28,33 @@ local function IsInteractionBusy()
 end
 
 local lastEquippedTotem = nil
-local lastSwapTime = 0
 
--- Config SavedVariables
-TotemSwapDb = TotemSwapDb or { enabled = true, spam = true }
-
--- Throttles par groupe de sorts (en secondes)
-local THROTTLE_SHOCK = 6.0      -- Earth/Flame/Frost Shock, Chain Lightning
-local THROTTLE_BOLT = 1.8       -- Lightning Bolt
-local THROTTLE_GENERIC = 1.5    -- GCD pour Molten Blast
-
--- Map: sort → totem (nom exact pour matching)
-local TotemMap = {
-    ["Earth Shock"] = "Totem of Rage",
-    ["Flame Shock"] = "Totem of Rage",
-    ["Frost Shock"] = "Totem of Rage",
-    ["Lightning Bolt"] = "Totem of the Storm",
-    ["Chain Lightning"] = "Totem of the Storm",
-    ["Molten Blast"] = "Totem of Eruption",
+-- Config SavedVariables avec modes configurables
+TotemSwapDb = TotemSwapDb or { 
+    enabled = true, 
+    spam = true,
+    -- Modes pour choix de totems prioritaires
+    shockMode = "rage",        -- "rage" ou "stonebreaker"
+    boltMode = "storm"         -- "storm" ou "crackling"
 }
 
-local WatchedNames = {}
-for _, name in pairs(TotemMap) do WatchedNames[name] = true end
+-- GCD global uniquement
+local GCD_THROTTLE = 1.5
+
+-- Noms des totems
+local TOTEM_RAGE = "Totem of Rage"
+local TOTEM_STONEBREAKER = "Totem of the Stonebreaker"
+local TOTEM_STORM = "Totem of the Storm"
+local TOTEM_CRACKLING = "Totem of Crackling Thunder"
+local TOTEM_ERUPTION = "Totem of Eruption"
+
+local WatchedNames = {
+    [TOTEM_RAGE] = true,
+    [TOTEM_STONEBREAKER] = true,
+    [TOTEM_STORM] = true,
+    [TOTEM_CRACKLING] = true,
+    [TOTEM_ERUPTION] = true
+}
 
 local function ItemIDFromLink(link)
     if not link then return nil end
@@ -157,8 +160,43 @@ local function HasItemInBags(itemName)
 end
 
 local function HasTotem(totemName)
-    local equipped = GetInventoryItemLink("player", 17)  -- Off-hand slot (17)
-    return (lastEquippedTotem == totemName) or (equipped and string_find(equipped, totemName, 1, true)) or HasItemInBags(totemName)
+    local equipped = GetInventoryItemLink("player", 17)
+    return (lastEquippedTotem == totemName) or 
+           (equipped and string_find(equipped, totemName, 1, true)) or 
+           HasItemInBags(totemName)
+end
+
+local function GetGCDRemaining()
+    local start, duration, enabled = GetSpellCooldown(61304, BOOKTYPE_SPELL)
+    if not (start and duration) or enabled == 0 or duration == 0 then return 0 end
+    local remaining = (start + duration) - GetTime()
+    return math.max(0, remaining)
+end
+
+-- NOUVEAU: Résout le totem selon le mode config et la disponibilité
+local function ResolveTotemForSpell(spellName)
+    if spellName == "Molten Blast" then
+        return TOTEM_ERUPTION
+    elseif spellName == "Earth Shock" or spellName == "Flame Shock" or spellName == "Frost Shock" then
+        -- Shock mode: priorité selon config, fallback à l'autre
+        if TotemSwapDb.shockMode == "stonebreaker" then
+            if HasTotem(TOTEM_STONEBREAKER) then return TOTEM_STONEBREAKER end
+            if HasTotem(TOTEM_RAGE) then return TOTEM_RAGE end
+        else
+            if HasTotem(TOTEM_RAGE) then return TOTEM_RAGE end
+            if HasTotem(TOTEM_STONEBREAKER) then return TOTEM_STONEBREAKER end
+        end
+    elseif spellName == "Lightning Bolt" or spellName == "Chain Lightning" then
+        -- Bolt mode: priorité selon config, fallback à l'autre
+        if TotemSwapDb.boltMode == "crackling" then
+            if HasTotem(TOTEM_CRACKLING) then return TOTEM_CRACKLING end
+            if HasTotem(TOTEM_STORM) then return TOTEM_STORM end
+        else
+            if HasTotem(TOTEM_STORM) then return TOTEM_STORM end
+            if HasTotem(TOTEM_CRACKLING) then return TOTEM_CRACKLING end
+        end
+    end
+    return nil
 end
 
 local function EquipTotemForSpell(spellName, totemName)
@@ -171,22 +209,15 @@ local function EquipTotemForSpell(spellName, totemName)
     if IsInteractionBusy() then return false end
 
     local now = GetTime()
-    local throttle = nil
-    if spellName == "Lightning Bolt" then
-        throttle = THROTTLE_BOLT
-    elseif TotemMap[spellName] == "Totem of Rage" or spellName == "Chain Lightning" then
-        throttle = THROTTLE_SHOCK
-    else
-        throttle = THROTTLE_GENERIC
+    if lastSwapTime and (now - lastSwapTime) < 1.5 then 
+        return false 
     end
-
-    if (now - lastSwapTime) < throttle then return false end
+    lastSwapTime = now  -- Met à jour APRÈS validation
 
     local bag, slot = HasItemInBags(totemName)
     if bag and slot and not (CursorHasItem and CursorHasItem()) then
         UseContainerItem(bag, slot)
         lastEquippedTotem = totemName
-        lastSwapTime = now
         if TotemSwapDb.spam then
             DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Équipé |cFFFFD700" .. totemName .. "|r (|cFF88FF88" .. spellName .. "|r)")
         end
@@ -212,8 +243,9 @@ local Original_UseAction = UseAction
 
 local function HandleSpellCast(base, rank, spellId)
     if not TotemSwapDb.enabled or not base then return end
-    local totem = TotemMap[base]
-    if not totem or not HasTotem(totem) then return end
+    
+    local totem = ResolveTotemForSpell(base)
+    if not totem then return end
 
     local ready = spellId and IsSpellReadyById(spellId) or IsSpellReady((rank and rank ~= "") and (base .. "(" .. rank .. ")") or base)
     if not ready then return end
@@ -241,11 +273,12 @@ function UseAction(slot, checkCursor, onSelf)
     return Original_UseAction(slot, checkCursor, onSelf)
 end
 
--- Slash commands
+-- NOUVELLES commandes slash pour config
 local function HandleTotemSwapCommand(msg)
     msg = string.lower(msg or "")
-    local _, _, cmd = string_find(msg, "^(%S*)")
+    local _, _, cmd, arg = string_find(msg, "^(%S+)%s*(.-)$")
     cmd = cmd or ""
+    arg = string.lower(arg or "")
 
     if cmd == "on" then
         TotemSwapDb.enabled = true
@@ -257,15 +290,48 @@ local function HandleTotemSwapCommand(msg)
         TotemSwapDb.spam = not TotemSwapDb.spam
         local status = TotemSwapDb.spam and "|cFF00FF00ON|r" or "|cFFFF0000OFF|r"
         DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Messages: " .. status)
-    elseif cmd == "status" then
+        
+    -- NOUVEAU: Shock mode
+    elseif cmd == "shock" or cmd == "shocks" then
+        if arg == "stonebreaker" or arg == "sb" or arg == "stone" then
+            TotemSwapDb.shockMode = "stonebreaker"
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Shocks → |cFFFFD700" .. TOTEM_STONEBREAKER .. "|r (priorité)")
+        elseif arg == "rage" or arg == "r" then
+            TotemSwapDb.shockMode = "rage"
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Shocks → |cFFFFD700" .. TOTEM_RAGE .. "|r (priorité)")
+        else
+            local current = (TotemSwapDb.shockMode == "stonebreaker") and TOTEM_STONEBREAKER or TOTEM_RAGE
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Shocks: |cFFFFD700" .. current .. "|r |cFF888888(/ts shock [rage/stonebreaker])|r")
+        end
+        
+    -- NOUVEAU: Bolt mode
+    elseif cmd == "bolt" or cmd == "bolts" then
+        if arg == "crackling" or arg == "crack" or arg == "c" then
+            TotemSwapDb.boltMode = "crackling"
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Bolts → |cFFFFD700" .. TOTEM_CRACKLING .. "|r (priorité)")
+        elseif arg == "storm" or arg == "s" then
+            TotemSwapDb.boltMode = "storm"
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Bolts → |cFFFFD700" .. TOTEM_STORM .. "|r (priorité)")
+        else
+            local current = (TotemSwapDb.boltMode == "crackling") and TOTEM_CRACKLING or TOTEM_STORM
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r Bolts: |cFFFFD700" .. current .. "|r |cFF888888(/ts bolt [storm/crackling])|r")
+        end
+
+    elseif cmd == "status" or cmd == "gcd" then
         local status = TotemSwapDb.enabled and "|cFF00FF00ACTIVÉ|r" or "|cFFFF0000DÉSACTIVÉ|r"
+        local now = GetTime()
+        local timeSinceSwap = now - (lastSwapTime or 0)
+        local shock = (TotemSwapDb.shockMode == "stonebreaker") and TOTEM_STONEBREAKER or TOTEM_RAGE
+        local bolt = (TotemSwapDb.boltMode == "crackling") and TOTEM_CRACKLING or TOTEM_STORM
         DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r " .. status)
+        DEFAULT_CHAT_FRAME:AddMessage("  Shocks: |cFFFFD700" .. shock .. "|r  | Bolts: |cFFFFD700" .. bolt .. "|r  |cFF888888(" .. string.format("%.1fs depuis dernier swap)|r"))
+
     elseif cmd == "" then
         TotemSwapDb.enabled = not TotemSwapDb.enabled
         local status = TotemSwapDb.enabled and "|cFF00FF00ACTIVÉ|r" or "|cFFFF0000DÉSACTIVÉ|r"
         DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r " .. status)
     else
-        DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r /ts [on/off/spam/status] ou /totemswap")
+        DEFAULT_CHAT_FRAME:AddMessage("|cFFAAAAFF[TotemSwap]:|r /ts [on/off/spam/status/shock/bolt] ou /totemswap")
     end
 end
 

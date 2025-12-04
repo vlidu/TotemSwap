@@ -1,33 +1,17 @@
 # TotemSwap
 
-TotemSwap est un addon World of Warcraft 1.12 (Turtle WoW) qui équipe automatiquement le totem dans la main gauche en fonction du sort lancé par le Chaman. Il facilite la rotation en évitant les changements manuels d’items.
+TotemSwap est un addon World of Warcraft 1.12 (Turtle WoW) qui équipe automatiquement le totem dans la main gauche en fonction du sort lancé par le Chaman. **GCD-based** (gère les casts annulés) avec **options configurables** pour les totems prioritaires.
 
 ---
 
 ## Fonctionnalités
 
-- Équipe **Totem of Rage** lors du lancement de :
-  - Earth Shock
-  - Flame Shock
-  - Frost Shock
-
-- Équipe **Totem of the Storm** lors du lancement de :
-  - Lightning Bolt
-  - Chain Lightning
-
-- Équipe **Totem of Eruption** lors du lancement de :
-  - Molten Blast
-
-- Gestion des cooldowns et délais d’équipement pour ne pas spammer les swaps inutilement :
-  - 6 secondes pour les shocks et Chain Lightning
-  - 1.8 secondes pour Lightning Bolt
-  - GCD throttle pour Molten Blast
-
-- Compatible avec les ranks de sorts (basé sur 1.12).
-
-- Bloque les swaps lors d’interactions avec les marchands, banque, hôtel des ventes, etc.
-
-- Option de messages de debug activables/désactivables.
+- **Shocks** (Earth/Flame/Frost Shock) → **Totem of Rage** ou **Totem of the Stonebreaker** (configurable)
+- **Bolts** (Lightning Bolt/Chain Lightning) → **Totem of the Storm** ou **Totem of Crackling Thunder** (configurable)
+- **Molten Blast** → **Totem of Eruption**
+- **GCD global** (1.5s) pour tous les swaps → parfait pour les casts annulés
+- **Fallback automatique** : utilise l'autre totem si le prioritaire n'est pas disponible
+- Compatible ranks, bloque les swaps en vendor/bank/HV, messages optionnels
 
 ---
 
@@ -45,19 +29,48 @@ TotemSwap est un addon World of Warcraft 1.12 (Turtle WoW) qui équipe automatiq
 
 ## Commandes Slash
 
-- `/ts` ou `/totemswap` : active/désactive l’addon.
-- `/ts on` : active l’addon.
-- `/ts off` : désactive l’addon.
-- `/ts spam` : active/désactive les messages de swap.
-- `/ts status` : affiche l’état actuel de l’addon.
+/ts ou /totemswap → Toggle ON/OFF
+/ts on → Activer
+/ts off → Désactiver
+/ts spam → Toggle messages de swap
+
+---
+
+### Configuration des totems
+/ts shock [rage/r/stonebreaker/sb/stone] → Priorité Shocks
+/ts bolt [storm/s/crackling/crack/c] → Priorité Bolts
+
+---
+
+### Status
+/ts status ou /ts gcd → État + configs + timing dernier swap
+
+---
+
+## Exemple de Status
+
+Shocks: Totem of Rage | Bolts: Totem of the Storm (1.2s depuis dernier swap)
+
+---
+
+## Configuration Recommandée
+
+**Pour DPS Elemental classique :**
+/ts shock rage
+/ts bolt storm
+
+**Pour burst maximisé :**
+/ts shock stonebreaker
+/ts bolt crackling
 
 ---
 
 ## Notes
 
-- Assure-toi d’avoir les totems (`Totem of Rage`, `Totem of the Storm`, `Totem of Eruption`) soit équipés, soit dans ton inventaire.
-- L’addon équipe uniquement les totems dans la main gauche (slot 17).
-- Conçu pour Turtle WoW 1.12, peut nécessiter ajustements pour d’autres versions.
+- **Slots surveillés** : Main gauche (17) + tous les sacs
+- **GCD-based** : Swap uniquement quand GCD=0 (même après cast annulé)
+- **Totems requis** : Au moins un des deux totems par catégorie dans les sacs/équipé
+- Turtle WoW 1.12 uniquement
 
 ---
 
