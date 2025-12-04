@@ -56,12 +56,6 @@ local WatchedNames = {
     [TOTEM_ERUPTION] = true
 }
 
-local function IsPlayerCasting()
-    local spell = UnitCastingInfo and UnitCastingInfo("player")
-    DEFAULT_CHAT_FRAME:AddMessage(spell)
-    return spell ~= nil
-end
-
 local function ItemIDFromLink(link)
     if not link then return nil end
     local _, _, id = string_find(link, "item:(%d+)")
@@ -208,10 +202,6 @@ local function ResolveTotemForSpell(spellName)
 end
 
 local function EquipTotemForSpell(spellName, totemName)
-    if IsPlayerCasting() then
-        return false
-    end
-
     local equipped = GetInventoryItemLink("player", 17)
     if equipped and string_find(equipped, totemName, 1, true) then
         lastEquippedTotem = totemName
