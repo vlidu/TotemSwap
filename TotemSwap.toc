@@ -1,0 +1,6 @@
+## Interface: 11200
+## Title: TotemSwap
+## Notes: Swaps to the correct Totem before casting Shaman spells
+## Author: Frozr
+## SavedVariables: TotemSwapDb
+TotemSwap.lua
